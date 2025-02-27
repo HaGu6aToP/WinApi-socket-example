@@ -174,12 +174,14 @@ void MainWndAddWidges(HWND hWnd) {
 }
 
 void EditListViewLine(HWND hListView, int iItem, LPWSTR text) {
-	LVITEM lvI;
+	/*LVITEM lvI;
 	lvI.mask = LVIF_TEXT;
 	lvI.iItem = iItem;
 	lvI.iSubItem = 0;
 	lvI.pszText = text;
-	ListView_InsertItem(hListView, &lvI);
+	ListView_InsertItem(hListView, &lvI);*/
+	ListView_SetItemText(hListView, iItem, 0, text);
+	
 }
 
 LRESULT CALLBACK PortChangeProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -382,6 +384,7 @@ void ServerStop(HWND hWnd) {
 void OnWSAAccept(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	int rc;
+
 	// При ошибке отменяем поступление извещений
 	// в главное окно приложения
 	if (WSAGETSELECTERROR(lParam) != 0)
@@ -408,6 +411,7 @@ void OnWSAAccept(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	// сообщение WSA_NETEVENT.
 	// Это же сообщение поступит при разрыве соединения
 	
+
 	if (WSAAsyncSelect(srv_socket, hWnd, WSA_NETEVENT, FD_READ | FD_CLOSE) > 0)
 	{
 		closesocket(srv_socket);
@@ -415,6 +419,11 @@ void OnWSAAccept(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		return;
 	}
 	
+	if (WSAGETSELECTEVENT(lParam) != FD_CLOSE) {
+		EditListViewLine(g_hListViewConnections, g_QueueLength, (LPWSTR)L"Anonymous");
+		g_QueueLength++;
+	}
+
 }
 
 void OnWSANetEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -441,7 +450,12 @@ void OnWSANetEvent(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	else if (WSAGETSELECTEVENT(lParam) == FD_CLOSE)
 	{
 		g_QueueLength--;
-		EditListViewLine(g_hListViewConnections, g_QueueLength, (LPWSTR)L"Anonymous");
+		EditListViewLine(g_hListViewConnections, g_QueueLength, (LPWSTR)L"-");
 		MessageBox(NULL, L"Connection closed", L"Server", MB_OK);
 	}
+}
+
+void Int64toString(wchar_t* buff, unsigned long long num) {
+	for (int i = 0; i < 8; i++)
+		buff[i] = num >> (8 - 1 - i) * 8;
 }

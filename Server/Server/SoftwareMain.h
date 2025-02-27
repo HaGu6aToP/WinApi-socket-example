@@ -42,6 +42,7 @@ void EditListViewLine(HWND hListView, int iItem, LPWSTR text);
 void LoadData();
 void SaveData();
 void IntToString(int num, wchar_t* str);
+void Int64toString(wchar_t* buff, unsigned long long num);
 
 // Запуск сервера
 void ServerStart(HWND hWnd);

@@ -1,7 +1,6 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "SoftwareMain.h"
 
-
 HWND g_hStaticDeclaration, g_hStaticNickname;
 HWND g_hButtonCreateDeclaration, g_hButtonNextDeclaration, g_hButtonPrevDeclaration, g_hButtonUpdate;
 HMENU g_hMenuLogout, g_hMenuAccount;
@@ -30,7 +29,6 @@ wchar_t g_AddressBuffer[16];
 SOCKET srv_socket;
 SOCKADDR_IN local_sin;
 SOCKADDR_IN dest_sin;
-
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInst, LPSTR args, int ncmdshow) {
 	WNDCLASS SoftwareMainClass = NewWindowClass((HBRUSH)COLOR_WINDOW, LoadCursor(NULL, IDC_ARROW), hInstance, LoadIcon(NULL, IDI_QUESTION), L"MainWndClass", SoftwareMainProcedure);
