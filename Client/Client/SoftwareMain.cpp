@@ -1,30 +1,36 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "SoftwareMain.h"
 
-HWND g_hStaticDeclaration, g_hStaticNickname;
+HWND g_hStaticAdvertisements, g_hStaticNickname, g_hStaticLogged;
 HWND g_hButtonCreateDeclaration, g_hButtonNextDeclaration, g_hButtonPrevDeclaration, g_hButtonUpdate;
 HMENU g_hMenuLogout, g_hMenuAccount;
 
 HWND g_hWndMain;
-HWND g_hEditPortChange, g_hWndPortChange;
+HWND g_hEditPortChange, g_hWndPortChange, g_EditMakeAdvertise;
 HWND g_hWndAddressChange, g_hEditAddressChange;
 HWND g_hWndLoggin, g_hEditLogginNickname, g_hEditLogginPassword, g_hButtonEnter;
 
 BOOL g_isLogged = FALSE;
 
-wchar_t g_Password[MAX_PASSWORD_LENGTH];
-wchar_t g_Nickname[MAX_NICKNAME_LENGTH];
+char g_nickname[MAX_NICKNAME_LENGTH];
+char g_password[MAX_PASSWORD_LENGTH];
+char g_text[MAX_TEXT_LENGTH];
 
-wchar_t g_PasswordBuffer[MAX_PASSWORD_LENGTH];
-wchar_t g_NicknameBuffer[MAX_NICKNAME_LENGTH];
+wchar_t g_password_buffer[MAX_PASSWORD_LENGTH];
+wchar_t g_nickname_buffer[MAX_NICKNAME_LENGTH];
 
 INT g_Port = 12000;
 wchar_t g_Adress[MAX_ADDRESS_LENGTH] = L"127.0.0.1";
 HDECLARE g_hDeclares = NULL;
 HINSTANCE g_hInst;
 
+MESSAGE message;
+
 wchar_t g_PortBuffer[16];
 wchar_t g_AddressBuffer[16];
+
+std::vector<std::unique_ptr<char*>> g_advertisements;
+int g_current_advertise = 0;
 
 SOCKET srv_socket;
 SOCKADDR_IN local_sin;
@@ -72,13 +78,80 @@ LRESULT CALLBACK SoftwareMainProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp
 			UpdateWindow(g_hWndPortChange);
 			break;
 		case IDM_LogginAction:
-			g_hWndLoggin = CreateChildLogginWindow(g_hInst, hWnd, L"Loggin", LogginProcedure);
+			g_hWndLoggin = CreateChildLogginWindow(g_hInst, hWnd, L"Log in", LogginProcedure);
 			ShowWindow(g_hWndPortChange, SW_NORMAL);
 			UpdateWindow(g_hWndPortChange);
 			break;
+		case IDM_LoggoutAction:
+			MessageBoxA(NULL, "You logged out", "Success", MB_OK);
+			ShowWindow(g_hStaticLogged, SW_HIDE);
+			EnableMenuItem(g_hMenuAccount, 1, MF_BYPOSITION | MF_GRAYED | MF_DISABLED);
+			EnableMenuItem(g_hMenuAccount, 0, MF_BYPOSITION | MF_ENABLED);
+			break;
+		case IDC_CreateAdvertiseButton:
+		{
+			HWND w = CreateChildMakeAdvertiseWindow(g_hInst, hWnd, L"Make advertise", MakeAdvertiseProcedure);
+			ShowWindow(w, SW_NORMAL);
+			UpdateWindow(w);
+			break;
+		}
+		case IDC_UpdateButton:
+		{
+			SendMsg(1);
+
+			int rc;
+			LOGGEDMESSAGE lm = {};
+			rc = recv(srv_socket, (char*)&lm, sizeof(LOGGEDMESSAGE), 0);
+
+			if (rc == 0) {
+				MessageBoxA(NULL, "Login error", "Error", MB_OK);
+			}
+
+			if (lm.logged == -1) {
+				MessageBoxA(NULL, "Incorrect password", "Loging", MB_OK);
+				break;
+			}
+
+
+
+			char len[256];
+			g_advertisements.clear();
+			char text_buff[MAX_TEXT_LENGTH];
+			recv(srv_socket, len, sizeof(char)*MAX_TEXT_LENGTH, 0);
+			int k = std::atoi(len);
+			for (int i = 0; i < std::atoi(len); i++) {
+				recv(srv_socket, text_buff, sizeof(char) * MAX_TEXT_LENGTH, 0);
+
+				char* newstr = new char[MAX_TEXT_LENGTH];
+				strcpy(newstr, text_buff);
+
+				g_advertisements.push_back(std::move(std::make_unique<char*>(newstr)));
+			}
+
+			g_current_advertise = 0;
+			ShowAdvertise();
+		}
+		case IDC_PrevAdvertiseButton: 
+			if (g_current_advertise == 0) {
+				g_current_advertise = g_advertisements.size() - 1;
+			}
+			else {
+				g_current_advertise--;
+			}
+			ShowAdvertise();
+			break;
+		case IDC_NextAdvertiseButton:
+			if (g_current_advertise == g_advertisements.size() - 1) {
+				g_current_advertise = 0;
+			}
+			else {
+				g_current_advertise++;
+			}
+			ShowAdvertise();
 		}
 		break;
 	case WM_CREATE:
+	{
 		MainwndAddMenus(hWnd);
 		MainWndAddWidges(hWnd);
 
@@ -91,7 +164,7 @@ LRESULT CALLBACK SoftwareMainProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp
 
 		WSADATA  WSAData;
 		// Инициализация и проверка версии Windows Sockets
-		
+
 		if (WSAStartup(MAKEWORD(1, 1), &WSAData) != 0)
 		{
 			MessageBox(NULL, L"WSAStartup error", L"Error", MB_OK);
@@ -101,6 +174,7 @@ LRESULT CALLBACK SoftwareMainProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp
 		SetConnection(hWnd);
 
 		break;
+	}
 	case WM_DESTROY:
 		SaveData();
 		WSACleanup();
@@ -115,14 +189,14 @@ void MainwndAddMenus(HWND hWnd) {
 	HMENU Settings = CreateMenu();
 	HMENU Account = CreateMenu();
 
-	AppendMenu(Settings, MF_STRING, IDM_ChangePortMenuAction, L"Изменить порт");
-	AppendMenu(Settings, MF_STRING, IDM_ChangeAddressMenuAction, L"Изменить адрес");
+	AppendMenu(Settings, MF_STRING, IDM_ChangePortMenuAction, L"Change port");
+	AppendMenu(Settings, MF_STRING, IDM_ChangeAddressMenuAction, L"Change address");
 
-	AppendMenu(Account, MF_STRING, IDM_LogginAction, L"Войти");
-	AppendMenu(Account, MF_STRING, NULL, L"Выйти");
+	AppendMenu(Account, MF_STRING, IDM_LogginAction, L"Log in");
+	AppendMenu(Account, MF_STRING, IDM_LoggoutAction, L"Log out");
 	
-	AppendMenu(RootMenu, MF_POPUP, (UINT_PTR)Settings, L"Настройки");
-	AppendMenu(RootMenu, MF_POPUP, (UINT_PTR)Account, L"Профиль");
+	AppendMenu(RootMenu, MF_POPUP, (UINT_PTR)Settings, L"Settings");
+	AppendMenu(RootMenu, MF_POPUP, (UINT_PTR)Account, L"Profile");
 
 	EnableMenuItem(Account, 1, MF_BYPOSITION | MF_GRAYED | MF_DISABLED);
 
@@ -132,13 +206,16 @@ void MainwndAddMenus(HWND hWnd) {
 }
 
 void MainWndAddWidges(HWND hWnd) {
-	g_hStaticDeclaration = CreateWindowEx(0, L"STATIC", L"None", WS_CHILD | WS_VISIBLE | WS_BORDER | SS_CENTER,200, 50, 300, 300, hWnd, NULL, GetModuleHandle(NULL), NULL);
-	g_hStaticDeclaration = CreateWindowEx(0, L"STATIC", L"Logged as: ", WS_CHILD | WS_VISIBLE | SS_CENTER, 520, 5, 150, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
+	g_hStaticAdvertisements = CreateWindowEx(0, L"STATIC", L"None", WS_CHILD | WS_VISIBLE | WS_BORDER | SS_CENTER,200, 50, 300, 300, hWnd, NULL, GetModuleHandle(NULL), NULL);
+	g_hStaticLogged = CreateWindowEx(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_CENTER, 520, 5, 150, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
 	
-	g_hButtonCreateDeclaration = CreateWindowEx(0, L"BUTTON", L"Создать объявление", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 250, 25, 200, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
-	g_hButtonPrevDeclaration = CreateWindowEx(0, L"BUTTON", L"<=", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 120, 130, 30, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
-	g_hButtonNextDeclaration = CreateWindowEx(0, L"BUTTON", L"=>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 540, 130, 30, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
-	g_hButtonUpdate = CreateWindowEx(0, L"BUTTON", L"Обновить", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 300, 355, 100, 20, hWnd, NULL, GetModuleHandle(NULL), NULL);
+	ShowWindow(g_hStaticLogged, SW_HIDE);
+
+
+	g_hButtonCreateDeclaration = CreateWindowEx(0, L"BUTTON", L"Create advertise", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 250, 25, 200, 20, hWnd, (HMENU)IDC_CreateAdvertiseButton, GetModuleHandle(NULL), NULL);
+	g_hButtonPrevDeclaration = CreateWindowEx(0, L"BUTTON", L"<=", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 120, 130, 30, 20, hWnd, (HMENU)IDC_PrevAdvertiseButton, GetModuleHandle(NULL), NULL);
+	g_hButtonNextDeclaration = CreateWindowEx(0, L"BUTTON", L"=>", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 540, 130, 30, 20, hWnd, (HMENU)IDC_NextAdvertiseButton, GetModuleHandle(NULL), NULL);
+	g_hButtonUpdate = CreateWindowEx(0, L"BUTTON", L"Update", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 300, 355, 100, 20, hWnd, (HMENU)IDC_UpdateButton, GetModuleHandle(NULL), NULL);
 
 }
 
@@ -182,9 +259,9 @@ HWND CreateChildChangePortWindow(HINSTANCE hInst, HWND hWnd, LPCWSTR Name, WNDPR
 	HWND res = CreateWindow(L"ChildWindowPortChange", Name, WM_ACTIVATEAPP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX, 150, 150, 400, 110, hWnd, NULL, hInst, NULL);
 
 	IntToString(g_Port, g_PortBuffer);
-	CreateWindow(L"static", L"Прослушиваемый порт", WS_VISIBLE | WS_CHILD, 120, 0, 200, 20, res, NULL, NULL, NULL);
+	CreateWindow(L"static", L"Listening port", WS_VISIBLE | WS_CHILD, 120, 0, 200, 20, res, NULL, NULL, NULL);
 	g_hEditPortChange = CreateWindowEx(0, L"EDIT", g_PortBuffer, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 148, 20, 100, 20, res, NULL, GetModuleHandle(NULL), NULL);
-	CreateWindowEx(0, L"BUTTON", L"Изменить", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 148, 45, 100, 20, res, (HMENU)IDC_ChangePortButton, GetModuleHandle(NULL), NULL);
+	CreateWindowEx(0, L"BUTTON", L"Change", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 148, 45, 100, 20, res, (HMENU)IDC_ChangePortButton, GetModuleHandle(NULL), NULL);
 	return res;
 }
 LRESULT CALLBACK PortChangeProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -216,9 +293,9 @@ HWND CreateChildChangeAddressWindow(HINSTANCE hInst, HWND hWnd, LPCWSTR Name, WN
 	RegisterClass(&w);
 	HWND res = CreateWindow(L"ChildWindowAddressChange", Name, WM_ACTIVATEAPP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX, 150, 150, 400, 110, hWnd, NULL, hInst, NULL);
 
-	CreateWindow(L"static", L"Адрес", WS_VISIBLE | WS_CHILD, 180, 0, 200, 20, res, NULL, NULL, NULL);
+	CreateWindow(L"static", L"Adress", WS_VISIBLE | WS_CHILD, 180, 0, 200, 20, res, NULL, NULL, NULL);
 	g_hEditAddressChange = CreateWindowEx(0, L"EDIT", g_Adress, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 145, 20, 110, 20, res, NULL, GetModuleHandle(NULL), NULL);
-	CreateWindowEx(0, L"BUTTON", L"Изменить", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 150, 45, 100, 20, res, (HMENU)IDC_ChangeAddressButton, GetModuleHandle(NULL), NULL);
+	CreateWindowEx(0, L"BUTTON", L"Change", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 150, 45, 100, 20, res, (HMENU)IDC_ChangeAddressButton, GetModuleHandle(NULL), NULL);
 	return res;
 }
 LRESULT CALLBACK AddressChangeProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -250,13 +327,13 @@ LRESULT CALLBACK AddressChangeProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM l
 HWND CreateChildLogginWindow(HINSTANCE hInst, HWND hWnd, LPCWSTR Name, WNDPROC Procedure) {
 	WNDCLASS w = NewWindowClass((HBRUSH)COLOR_WINDOW, LoadCursor(NULL, IDC_ARROW), hInst, LoadIcon(NULL, IDI_QUESTION), L"ChildWindowLoggin", Procedure);
 	RegisterClass(&w);
-	HWND res = CreateWindow(L"ChildWindowLoggin", Name, WM_ACTIVATEAPP | WS_VISIBLE | WS_SYSMENU, 150, 150, 200, 140, hWnd, NULL, hInst, NULL);
+	HWND res = CreateWindow(L"ChildWindowLoggin", Name, WM_ACTIVATEAPP | WS_VISIBLE | WS_SYSMENU, 150, 150, 220, 140, hWnd, NULL, hInst, NULL);
 
-	CreateWindow(L"static", L"Логин: ", WS_VISIBLE | WS_CHILD, 5, 10, 60, 20, res, NULL, NULL, NULL);
-	g_hEditLogginNickname = CreateWindowEx(0, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 70, 10, 110, 20, res, NULL, GetModuleHandle(NULL), NULL);
-	CreateWindow(L"static", L"Пароль: ", WS_VISIBLE | WS_CHILD, 5, 40, 60, 20, res, NULL, NULL, NULL);
-	g_hEditLogginPassword = CreateWindowEx(0, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 70, 40, 110, 20, res, NULL, GetModuleHandle(NULL), NULL);
-	CreateWindowEx(0, L"BUTTON", L"Войти", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 80, 70, 100, 20, res, (HMENU)IDC_LogginButton, GetModuleHandle(NULL), NULL);
+	CreateWindow(L"static", L"Nickname: ", WS_VISIBLE | WS_CHILD, 5, 10, 70, 20, res, NULL, NULL, NULL);
+	g_hEditLogginNickname = CreateWindowEx(0, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 75, 10, 110, 20, res, NULL, GetModuleHandle(NULL), NULL);
+	CreateWindow(L"static", L"Password: ", WS_VISIBLE | WS_CHILD, 5, 40, 70, 20, res, NULL, NULL, NULL);
+	g_hEditLogginPassword = CreateWindowEx(0, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT, 75, 40, 110, 20, res, NULL, GetModuleHandle(NULL), NULL);
+	CreateWindowEx(0, L"BUTTON", L"Enter", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 80, 75, 100, 20, res, (HMENU)IDC_LogginButton, GetModuleHandle(NULL), NULL);
 
 	return res;
 }
@@ -265,8 +342,8 @@ LRESULT CALLBACK LogginProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 	case WM_COMMAND:
 		switch (wp) {
 		case IDC_LogginButton:
-			int nickname_length = GetWindowText(g_hEditLogginNickname, g_NicknameBuffer, sizeof(g_NicknameBuffer));
-			int password_length = GetWindowText(g_hEditLogginPassword, g_PasswordBuffer, sizeof(g_PasswordBuffer));
+			int nickname_length = GetWindowTextA(g_hEditLogginNickname, g_nickname, sizeof(g_nickname));
+			int password_length = GetWindowTextA(g_hEditLogginPassword, g_password, sizeof(g_password));
 			
 			if (nickname_length == 0 || password_length == 0) {
 				break;
@@ -276,8 +353,32 @@ LRESULT CALLBACK LogginProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
 				break;
 			}
 
-			
-			
+			SendMsg(-1);
+
+			int rc;
+			LOGGEDMESSAGE lm = {};
+			rc = recv(srv_socket, (char*)&lm, sizeof(LOGGEDMESSAGE), 0);
+
+			if (rc == 0) {
+				MessageBoxA(NULL, "Login error", "Error", MB_OK);
+			}
+
+			if (lm.logged == 1) {
+				MessageBoxA(NULL, "You logged in", "Success", MB_OK);
+				EnableMenuItem(g_hMenuAccount, 0, MF_BYPOSITION | MF_GRAYED | MF_DISABLED);
+				EnableMenuItem(g_hMenuAccount, 1, MF_BYPOSITION | MF_ENABLED);
+
+				std::string str{ "Logged as: " };
+				str = str + std::string(g_nickname);
+				SetWindowTextA(g_hStaticLogged, str.c_str());
+				ShowWindow(g_hStaticLogged, SW_SHOW);
+			}
+			else {
+				ClearArray(g_nickname, MAX_NICKNAME_LENGTH);
+				ClearArray(g_password, MAX_PASSWORD_LENGTH);
+				MessageBoxA(NULL, "Incorrect password", "Loging", MB_OK);
+			}
+			SendMessage(hWnd, WM_CLOSE, wp, lp);
 			break;
 		}
 		break;
@@ -358,20 +459,6 @@ void SetConnection(HWND hWnd)
 	// Устанавливаем адрес IP и номер порта
 	dest_sin.sin_family = AF_INET;
 
-	// Определяем адрес узла
-	// Адрес локального узла для отладки
-	//phe = gethostbyname("localhost");
-	//perror(NULL);
-	//if (phe == NULL)
-	//{
-	//	closesocket(srv_socket);
-	//	MessageBox(NULL, L"gethostbyaddr error", L"Error", MB_OK);
-	//	return;
-	//}
-
-	//// Копируем адрес узла
-	//memcpy((char FAR*) & (dest_sin.sin_addr), phe->h_addr, phe->h_length);
-
 	char buff[16];
 	wsprintfA(buff, "%ls", g_Adress);
 	dest_sin.sin_addr .s_addr = inet_addr (buff);
@@ -396,5 +483,107 @@ void CloseConnection(HWND hWnd) {
 	// Если сокет был создан, закрываем его
 	if (srv_socket != INVALID_SOCKET) {
 		closesocket(srv_socket);
+	}
+}
+
+void ClearArray(char* a, int length) {
+	for (int i = 0; i < length; i++)
+		a[i] == '\0';
+}
+
+void SetMessage(HMESSAGE m, char nickname[MAX_NICKNAME_LENGTH], char password[MAX_PASSWORD_LENGTH], char text[MAX_TEXT_LENGTH]) {
+	int i;
+	for (i = 0; i < MAX_NICKNAME_LENGTH - 1; i++) {
+		if (nickname[i] == L'\0')
+			break;
+		m->nickname[i] = nickname[i];
+	}
+	m->nickname[i] = L'\0';
+
+	for (i = 0; i < MAX_PASSWORD_LENGTH - 1; i++) {
+		if (password[i] == L'\0')
+			break;
+		m->password[i] = password[i];
+	}
+	m->password[i] = L'\0';
+
+	for (i = 0; i < MAX_TEXT_LENGTH - 1; i++) {
+		if (text[i] == L'\0')
+			break;
+		m->text[i] = text[i];
+	}
+	m->text[i] = L'\0';
+	//strcpy(m->nickname, nickname);
+	//strcpy(m->password, password);
+	//strcpy(m->text, text);
+}
+
+void ClearMessage(HMESSAGE m) {
+	int i;
+	for (i = 0; i < MAX_NICKNAME_LENGTH; i++) {
+		m->nickname[i] = '\0';
+	}
+
+	for (i = 0; i < MAX_PASSWORD_LENGTH; i++) {
+		m->password[i] = '\0';
+	}
+
+	for (i = 0; i < MAX_TEXT_LENGTH; i++) {
+		m->text[i] = '\0';
+	}
+}
+
+HWND CreateChildMakeAdvertiseWindow(HINSTANCE hInst, HWND hWnd, LPCWSTR Name, WNDPROC Procedure) {
+	WNDCLASS w = NewWindowClass((HBRUSH)COLOR_WINDOW, LoadCursor(NULL, IDC_ARROW), hInst, LoadIcon(NULL, IDI_QUESTION), L"ChildWindowMakeAdvertise", Procedure);
+	RegisterClass(&w);
+	HWND res = CreateWindow(L"ChildWindowMakeAdvertise", Name, WM_ACTIVATEAPP | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX, 220, 150, 400, 500, hWnd, NULL, hInst, NULL);
+	g_EditMakeAdvertise = CreateWindowEx(0, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_LEFT | ES_MULTILINE, 45, 10, 300, 400, res, NULL, GetModuleHandle(NULL), NULL);
+	CreateWindowEx(0, L"BUTTON", L"Submit", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 140, 420, 100, 20, res, (HMENU)IDC_MakeAdvertisesSubmitButton, GetModuleHandle(NULL), NULL);
+	return res;
+}
+LRESULT CALLBACK MakeAdvertiseProcedure(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
+	switch (msg) {
+	case WM_COMMAND:
+		switch (wp) {
+		case IDC_MakeAdvertisesSubmitButton:
+			ClearArray(g_text, MAX_TEXT_LENGTH);
+			GetWindowTextA(g_EditMakeAdvertise, g_text, MAX_TEXT_LENGTH);
+			
+			if (strlen(g_text) == 0)
+				break;
+
+			if (strlen(g_password) == 0 || strlen(g_nickname) == 0) {
+				MessageBoxA(NULL, "You must login", "Erro", MB_OK);
+			}
+			else {
+				SendMsg(1);
+			}
+
+			SendMessage(hWnd, WM_CLOSE, wp, lp);
+		}
+		break;
+	case WM_CREATE:
+
+		break;
+	case WM_CLOSE:
+		DestroyWindow(hWnd);
+		break;
+	default: return DefWindowProc(hWnd, msg, wp, lp);
+	}
+}
+
+void SendMsg(int update) {
+	ClearMessage(&message);
+	message.update = update;
+	SetMessage(&message, g_nickname, g_password, g_text);
+	send(srv_socket, (char*)&message, sizeof(MESSAGE), 0);
+}
+
+void ShowAdvertise() {
+	if (g_advertisements.size() == 0) {
+		SetWindowTextA(g_hStaticAdvertisements, "None");
+	}
+	else {
+		SetWindowTextA(g_hStaticAdvertisements, *(g_advertisements.at(g_current_advertise).get()));
 	}
 }
